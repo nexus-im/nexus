@@ -143,12 +143,26 @@ func (c *Client) writePump() {
 
 // serveWs handles websocket requests from the peer.
 func serveWs(hub *Hub, w http.ResponseWriter, r *http.Request) {
+	tokenString := r.URL.Query().Get("token")
+	if tokenString == "" {
+		http.Error(w, "Unauthorized: missing token", http.StatusUnauthorized)
+		return
+	}
+
+	claims, err := authenticator.ValidateToken(tokenString)
+	if err != nil {
+		http.Error(w, "Unauthorized: invalid token", http.StatusUnauthorized)
+		return
+	}
+
 	// Upgrade initial GET request to a websocket
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
 		log.Println(err)
 		return
 	}
+
+	log.Printf("Client connected: %s (%s)", claims.Username, claims.UserID)
 
 	// Register new client
 	client := &Client{hub: hub, conn: conn, send: make(chan []byte, 256)}

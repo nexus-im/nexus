@@ -1,8 +1,9 @@
 module nexus/backend
 
-go 1.22.8
+go 1.23.0
 
 require (
-	github.com/DATA-DOG/go-sqlmock v1.5.2 // indirect
-	github.com/gorilla/websocket v1.5.3 // indirect
+	github.com/DATA-DOG/go-sqlmock v1.5.2
+	github.com/golang-jwt/jwt/v5 v5.3.0
+	github.com/gorilla/websocket v1.5.3
 )
