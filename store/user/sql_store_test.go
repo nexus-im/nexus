@@ -34,9 +34,9 @@ func TestCreate(t *testing.T) {
 	}
 
 	// Expectation
-	mock.ExpectExec(regexp.QuoteMeta(`INSERT INTO users (id, username, password_hash, created_at, last_seen) VALUES ($1, $2, $3, $4, $5)`)).
-		WithArgs(u.ID, u.Username, u.PasswordHash, u.CreatedAt, u.LastSeen).
-		WillReturnResult(sqlmock.NewResult(1, 1))
+	mock.ExpectQuery(regexp.QuoteMeta(`INSERT INTO users (username, password_hash, created_at, last_seen) VALUES ($1, $2, $3, $4) RETURNING id`)).
+		WithArgs(u.Username, u.PasswordHash, u.CreatedAt, u.LastSeen).
+		WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(u.ID))
 
 	err = store.Create(ctx, u)
 	if err != nil {

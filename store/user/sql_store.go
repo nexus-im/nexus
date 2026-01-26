@@ -18,8 +18,9 @@ func NewSQLStore(db *sql.DB) *SQLStore {
 
 func (s *SQLStore) Create(ctx context.Context, user *User) error {
 	query := `
-		INSERT INTO users (id, username, password_hash, created_at, last_seen)
-		VALUES ($1, $2, $3, $4, $5)
+		INSERT INTO users (username, password_hash, created_at, last_seen)
+		VALUES ($1, $2, $3, $4)
+		RETURNING id
 	`
 	// Handle databases that might use ? instead of $1 (like SQLite) by default?
 	// Or we just assume Postgres syntax for now as per design doc example?
@@ -30,13 +31,12 @@ func (s *SQLStore) Create(ctx context.Context, user *User) error {
 		user.CreatedAt = time.Now()
 	}
 
-	_, err := s.db.ExecContext(ctx, query,
-		user.ID,
+	err := s.db.QueryRowContext(ctx, query,
 		user.Username,
 		user.PasswordHash,
 		user.CreatedAt,
 		user.LastSeen,
-	)
+	).Scan(&user.ID)
 
 	if err != nil {
 		// In a real app, we'd check for unique constraint violation here

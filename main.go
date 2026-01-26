@@ -128,7 +128,6 @@ func handleRegister(w http.ResponseWriter, r *http.Request) {
 	// Modifying the store to support DB-generated IDs is better, but let's stick to the current store impl.
 	// I'll assume we need to provide an ID.
 	newUser := &user.User{
-		ID:           generateID(),
 		Username:     req.Username,
 		PasswordHash: string(hashedBytes),
 		CreatedAt:    time.Now(),
@@ -212,11 +211,6 @@ func handleLogin(w http.ResponseWriter, r *http.Request) {
 	if err := json.NewEncoder(w).Encode(resp); err != nil {
 		log.Printf("login response write error: %v", err)
 	}
-}
-
-// Simple ID generator for prototype
-func generateID() string {
-	return time.Now().Format("20060102150405") // Timestamp as ID for now
 }
 
 func generateSessionToken() (string, error) {
