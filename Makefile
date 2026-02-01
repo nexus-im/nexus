@@ -1,6 +1,6 @@
 # Go Backend Makefile
 
-BINARY_NAME=backend_server
+BINARY_NAME=nexus-server
 BUILD_DIR=bin
 GO_FILES=$(shell find . -name '*.go' -not -path "./vendor/*")
 
