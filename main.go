@@ -6,12 +6,15 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"flag"
-	"github.com/nexus-im/nexus/store/session"
-	"github.com/nexus-im/nexus/store/user"
 	"log"
 	"net/http"
 	"os"
+	"strings"
 	"time"
+
+	"github.com/nexus-im/nexus/store/conversation"
+	"github.com/nexus-im/nexus/store/session"
+	"github.com/nexus-im/nexus/store/user"
 
 	"golang.org/x/crypto/bcrypt"
 
@@ -22,8 +25,9 @@ var addr = flag.String("addr", ":8080", "http service address")
 
 // Global instances (in a real app, use dependency injection)
 var (
-	userStore    user.Store
-	sessionStore session.Store
+	userStore         user.Store
+	sessionStore      session.Store
+	conversationStore conversation.Store
 )
 
 const sessionTTL = 24 * time.Hour
@@ -57,6 +61,7 @@ func main() {
 
 	userStore = user.NewSQLStore(db)
 	sessionStore = session.NewSQLStore(db)
+	conversationStore = conversation.NewSQLStore(db)
 
 	hub := newHub()
 	go hub.run()
@@ -64,6 +69,7 @@ func main() {
 	// API Endpoints
 	http.HandleFunc("/api/register", handleRegister)
 	http.HandleFunc("/api/login", handleLogin)
+	http.HandleFunc("/api/conversations", handleCreateConversation)
 
 	// WebSocket Endpoint
 	http.HandleFunc("/ws", func(w http.ResponseWriter, r *http.Request) {
@@ -211,6 +217,138 @@ func handleLogin(w http.ResponseWriter, r *http.Request) {
 	if err := json.NewEncoder(w).Encode(resp); err != nil {
 		log.Printf("login response write error: %v", err)
 	}
+}
+
+func handleCreateConversation(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	userID, err := authenticateRequest(r)
+	if err != nil {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	var req struct {
+		Type      string   `json:"type"`
+		UserID    string   `json:"user_id"`
+		MemberIDs []string `json:"member_ids"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	switch req.Type {
+	case string(conversation.TypeP2P):
+		if req.UserID == "" {
+			http.Error(w, "user_id is required for p2p conversations", http.StatusBadRequest)
+			return
+		}
+		var existing *conversation.Conversation
+		if req.UserID == userID {
+			existing, err = conversationStore.GetSelfP2P(r.Context(), userID)
+		} else {
+			existing, err = conversationStore.GetP2PBetween(r.Context(), userID, req.UserID)
+		}
+		if err == nil {
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{
+				"conversation_id": existing.ID,
+				"created":         false,
+			})
+			return
+		}
+		if err != conversation.ErrConversationNotFound {
+			http.Error(w, "Failed to look up conversation", http.StatusInternalServerError)
+			return
+		}
+
+		convo := &conversation.Conversation{
+			Type:      conversation.TypeP2P,
+			CreatedBy: userID,
+			CreatedAt: time.Now(),
+		}
+		members := []string{userID}
+		if req.UserID != userID {
+			members = append(members, req.UserID)
+		}
+		if err := conversationStore.CreateConversation(r.Context(), convo, members); err != nil {
+			log.Fatal("Failed to create conversation:", err)
+			http.Error(w, "Failed to create conversation", http.StatusInternalServerError)
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusCreated)
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
+			"conversation_id": convo.ID,
+			"created":         true,
+		})
+		return
+
+	case string(conversation.TypeGroup):
+		if len(req.MemberIDs) == 0 {
+			http.Error(w, "member_ids is required for group conversations", http.StatusBadRequest)
+			return
+		}
+
+		memberSet := map[string]struct{}{userID: {}}
+		for _, id := range req.MemberIDs {
+			if id == "" {
+				continue
+			}
+			memberSet[id] = struct{}{}
+		}
+
+		members := make([]string, 0, len(memberSet))
+		for id := range memberSet {
+			members = append(members, id)
+		}
+
+		convo := &conversation.Conversation{
+			Type:      conversation.TypeGroup,
+			CreatedBy: userID,
+			CreatedAt: time.Now(),
+		}
+		if err := conversationStore.CreateConversation(r.Context(), convo, members); err != nil {
+			http.Error(w, "Failed to create conversation", http.StatusInternalServerError)
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusCreated)
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
+			"conversation_id": convo.ID,
+			"created":         true,
+		})
+		return
+	default:
+		http.Error(w, "Invalid conversation type", http.StatusBadRequest)
+		return
+	}
+}
+
+func authenticateRequest(r *http.Request) (string, error) {
+	token := strings.TrimSpace(r.Header.Get("X-Session-Token"))
+	if token == "" {
+		authHeader := r.Header.Get("Authorization")
+		if strings.HasPrefix(authHeader, "Bearer ") {
+			token = strings.TrimSpace(strings.TrimPrefix(authHeader, "Bearer "))
+		}
+	}
+	if token == "" {
+		return "", session.ErrSessionNotFound
+	}
+
+	sess, err := sessionStore.GetByToken(r.Context(), token)
+	if err != nil {
+		return "", err
+	}
+	return sess.UserID, nil
 }
 
 func generateSessionToken() (string, error) {
