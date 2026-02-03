@@ -4,7 +4,7 @@ BINARY_NAME=nexus-server
 BUILD_DIR=bin
 GO_FILES=$(shell find . -name '*.go' -not -path "./vendor/*")
 
-.PHONY: all build run test lint clean help
+.PHONY: all build run test unittest integration e2e lint clean help
 
 all: lint test build
 
@@ -20,6 +20,18 @@ run: build ## Build and run the server (default port 8081)
 test: ## Run unit tests
 	@echo "Testing..."
 	@go test -v ./...
+
+unittest: ## Run unit tests only (exclude integration and e2e)
+	@echo "Running unit tests..."
+	@go test -v $(shell go list ./... | grep -v '/tests/integration' | grep -v '/tests/e2e')
+
+integration: ## Run integration tests
+	@echo "Running integration tests..."
+	@go test -v ./tests/integration/...
+
+e2e: ## Run end-to-end tests
+	@echo "Running e2e tests..."
+	@go test -v ./tests/e2e/...
 
 lint: ## Run linter (using golangci-lint if installed, else go vet)
 	@echo "Linting..."
